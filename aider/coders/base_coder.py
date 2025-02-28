@@ -818,18 +818,18 @@ class Coder:
         if self.repo:
             self.commit_before_message.append(self.repo.get_head_commit_sha())
 
-    def run(self, with_message=None, preproc=True):
+    def run(self, with_message=None, preproc=True, **kwargs):
         try:
             if with_message:
                 self.io.user_input(with_message)
-                self.run_one(with_message, preproc)
+                self.run_one(with_message, preproc, **kwargs)
                 return self.partial_response_content
             while True:
                 try:
                     if not self.io.placeholder:
                         self.copy_context()
                     user_message = self.get_input()
-                    self.run_one(user_message, preproc)
+                    self.run_one(user_message, preproc, **kwargs)
                     self.show_undo_hint()
                 except KeyboardInterrupt:
                     self.keyboard_interrupt()
@@ -866,7 +866,7 @@ class Coder:
 
         return inp
 
-    def run_one(self, user_message, preproc):
+    def run_one(self, user_message, preproc, **kwargs):
         self.init_before_message()
 
         if preproc:
@@ -876,7 +876,7 @@ class Coder:
 
         while message:
             self.reflected_message = None
-            list(self.send_message(message))
+            list(self.send_message(message, **kwargs))
 
             if not self.reflected_message:
                 break
@@ -1277,7 +1277,7 @@ class Coder:
                 return False
         return True
 
-    def send_message(self, inp):
+    def send_message(self, inp, **kwargs):
         self.event("message_send_starting")
 
         self.cur_messages += [
@@ -1309,7 +1309,7 @@ class Coder:
         try:
             while True:
                 try:
-                    yield from self.send(messages, functions=self.functions)
+                    yield from self.send(messages, functions=self.functions, **kwargs)
                     break
                 except litellm_ex.exceptions_tuple() as err:
                     ex_info = litellm_ex.get_ex_info(err)
@@ -1622,7 +1622,7 @@ class Coder:
         if added_fnames:
             return prompts.added_files.format(fnames=", ".join(added_fnames))
 
-    def send(self, messages, model=None, functions=None):
+    def send(self, messages, model=None, functions=None, **kwargs):
         if not model:
             model = self.main_model
 
@@ -1638,6 +1638,7 @@ class Coder:
                 functions,
                 self.stream,
                 self.temperature,
+                **kwargs
             )
             self.chat_completion_call_hashes.append(hash_object.hexdigest())
 

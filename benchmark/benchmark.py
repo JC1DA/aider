@@ -39,6 +39,41 @@ app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
 
 load_dotenv(override=True)
 
+GRM_PREFIX = r"""// header
+start: ( step "\n" )* step ( "\n" final_comments )?
+step: plan "\n" a_file
+plan[lazy]: /((.|\n)*\n)?```/
+final_comments: /[^`]*/
+
+replace: "=======\n" repl_inner " REPLACE\n```"
+repl_inner[lazy]: /(.|\n)*\n>>>>>>>/
+SEARCH: "\n<<<<<<< SEARCH\n"
+
+// file_N: "filename.c" SEARCH FILE_N replace
+
+// start generated
+"""
+
+def lark_change_grm(files: dict[str, str]):
+    grm = GRM_PREFIX
+    file_options = []
+    grm_rx = ""
+    for idx, (file_name, file_content) in enumerate(files.items()):
+        fid = f"file_{idx}"
+        fid_rx = fid.upper()
+        file_options.append(fid)
+        file_lines = file_content.splitlines(keepends=True)
+        info = f"\n// {len(file_lines)} lines, {len(file_content.encode())} bytes\n"
+        grm += info
+        grm += f"{fid}: {json.dumps(file_name)} SEARCH {fid_rx} replace\n"
+        grm_rx += info
+        grm_rx += f"{fid_rx}: %regex {json.dumps({ "substring_chunks": file_lines }, indent=2)}\n"
+
+    grm += "\na_file: " + " | ".join(file_options) + "\n\n"
+    grm += grm_rx
+
+    return grm
+
 
 def find_latest_benchmark_dir():
     benchmark_dirs = [d for d in BENCHMARK_DNAME.iterdir() if d.is_dir()]
@@ -718,6 +753,7 @@ def run_test_real(
     solution_files.difference_update(ignore_files)
 
     # Copy all solution files
+    files_dict = {}
     for file_path in solution_files:
         src = testdir / Path(file_path)
         if src.exists():
@@ -736,9 +772,12 @@ def run_test_real(
             if original_fname.exists():
                 os.makedirs(src.parent, exist_ok=True)
                 shutil.copy(original_fname, src)
+
+            files_dict[file_path] = src.read_text()
         else:
             print(f"Warning: Solution file not found: {src}")
 
+    llguidance_grammar = lark_change_grm(files_dict)
     file_list = " ".join(fname.name for fname in fnames)
 
     instructions = ""
@@ -823,7 +862,7 @@ def run_test_real(
 
             coder.apply_updates()
         else:
-            response = coder.run(with_message=instructions, preproc=False)
+            response = coder.run(with_message=instructions, preproc=False, grammar=llguidance_grammar)
 
         dur += time.time() - start
 

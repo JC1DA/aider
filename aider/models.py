@@ -568,18 +568,22 @@ class Model(ModelSettings):
     def is_ollama(self):
         return self.name.startswith("ollama/") or self.name.startswith("ollama_chat/")
 
-    def send_completion(self, messages, functions, stream, temperature=None):
+    def send_completion(self, messages, functions, stream, temperature=None, **kwargs):
         if os.environ.get("AIDER_SANITY_CHECK_TURNS"):
             sanity_check_messages(messages)
 
         if self.is_deepseek_r1():
             messages = ensure_alternating_roles(messages)
 
+        grammar = kwargs.get("grammar", None)
+
         kwargs = dict(
             model=self.name,
             messages=messages,
             stream=stream,
         )
+        if grammar is not None:
+            kwargs["extra_body"] = {"ebnf": grammar}
 
         if self.use_temperature is not False:
             if temperature is None:
@@ -606,7 +610,9 @@ class Model(ModelSettings):
         hash_object = hashlib.sha1(key)
         if "timeout" not in kwargs:
             kwargs["timeout"] = request_timeout
+
         res = litellm.completion(**kwargs)
+
         return hash_object, res
 
     def remove_reasoning_content(self, res):
