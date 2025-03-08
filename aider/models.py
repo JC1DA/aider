@@ -617,11 +617,11 @@ class Model(ModelSettings):
             kwargs["api_base"] = os.environ["OPENAI_API_BASE"]
             kwargs["api_key"] = os.environ["OPENAI_API_KEY"]
         
-        ask_tag_string = "\nPut the final answer in between <FINAL_ANSWER> and </FINAL_ANSWER> tag."
-        if grammar is not None:
-            kwargs["max_tokens"] = kwargs.get("max_tokens", 8 * 1024)            
-            kwargs["messages"][-1]["content"] += ask_tag_string
-            kwargs["temperature"] = 0.6
+        ask_tag_string = "\nPut the final answer in between <FINAL_ANSWER> and </FINAL_ANSWER> tag. Only one final answer allowed."
+        kwargs["max_tokens"] = kwargs.get("max_tokens", 8 * 1024)            
+        kwargs["messages"][-1]["content"] += ask_tag_string
+        # kwargs["temperature"] = 0.6
+        kwargs["stop"] = ["</FINAL_ANSWER>"]
 
         # print("<USER>")
         # print(kwargs["messages"][-1]["content"] )
