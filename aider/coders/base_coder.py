@@ -36,6 +36,42 @@ from aider.utils import format_content, format_messages, format_tokens, is_image
 from ..dump import dump  # noqa: F401
 from .chat_chunks import ChatChunks
 
+GRM_PREFIX = r"""// header
+start: /(\n|.)*/ </think> ( step "\n" )* step ( "\n" final_comments )?
+step: plan "\n" a_file
+plan[lazy]: /((.|\n)*\n)?```/
+final_comments: /[^`]*/
+
+replace: "=======\n" repl_inner " REPLACE\n```"
+repl_inner[lazy]: /(.|\n)*\n>>>>>>>/
+SEARCH: "\n<<<<<<< SEARCH\n"
+
+// file_N: "filename.c" SEARCH FILE_N replace
+
+// start generated
+"""
+
+def lark_change_grm(files: dict[str, str]):
+    grm = GRM_PREFIX
+    file_options = []
+    grm_rx = ""
+    for idx, (file_name, file_content) in enumerate(files.items()):
+        fid = f"file_{idx}"
+        fid_rx = fid.upper()
+        file_options.append(fid)
+        file_lines = file_content.splitlines(keepends=True)
+        info = f"\n// {len(file_lines)} lines, {len(file_content.encode())} bytes\n"
+        grm += info
+        grm += f"{fid}: {json.dumps(file_name)} SEARCH {fid_rx} replace\n"
+        grm_rx += info
+        regex = json.dumps({ "substring_chunks": file_lines }, indent=2)
+        grm_rx += f"{fid_rx}: %regex {regex}\n"
+
+    grm += "\na_file: " + " | ".join(file_options) + "\n\n"
+    grm += grm_rx
+
+    return grm
+
 
 class UnknownEditFormat(ValueError):
     def __init__(self, edit_format, valid_formats):
@@ -495,6 +531,8 @@ class Coder:
                 self.io.tool_output("JSON Schema:")
                 self.io.tool_output(json.dumps(self.functions, indent=4))
 
+        self._messages = None
+
     def setup_lint_cmds(self, lint_cmds):
         if not lint_cmds:
             return
@@ -875,6 +913,7 @@ class Coder:
             message = user_message
 
         while message:
+            # print("MESSAGE", message)
             self.reflected_message = None
             list(self.send_message(message, **kwargs))
 
@@ -1231,6 +1270,7 @@ class Coder:
                 kwargs["max_tokens"] = 1
 
                 try:
+                    # print("cache: ", json.dumps(self.cache_warming_chunks.cacheable_messages(), indent=4))
                     completion = litellm.completion(
                         model=self.main_model.name,
                         messages=self.cache_warming_chunks.cacheable_messages(),
@@ -1280,12 +1320,20 @@ class Coder:
     def send_message(self, inp, **kwargs):
         self.event("message_send_starting")
 
+        # print("self.cur_messages", json.dumps(self.cur_messages, indent=4))
+
         self.cur_messages += [
             dict(role="user", content=inp),
         ]
 
+        # print("self.cur_messages", json.dumps(self.cur_messages, indent=4))
+
         chunks = self.format_messages()
+
         messages = chunks.all_messages()
+
+        # print("chunks", json.dumps(messages, indent=4))
+
         if not self.check_tokens(messages):
             return
         self.warm_cache(chunks)
@@ -1306,9 +1354,22 @@ class Coder:
         self.usage_report = None
         exhausted = False
         interrupted = False
+        self._messages = messages
         try:
             while True:
                 try:
+                    files_dict = {}
+                    for fname in list(self.abs_fnames):
+                        relative_fname = self.get_rel_fname(fname)
+                        files_dict[relative_fname] = open(fname, 'r').read()
+
+                        if not files_dict[relative_fname].endswith("\n"):
+                            files_dict[relative_fname] += "\n"
+                            with open(fname, "w") as f:
+                                f.write(files_dict[relative_fname])
+
+                    kwargs["grammar"] = lark_change_grm(files_dict)
+
                     yield from self.send(messages, functions=self.functions, **kwargs)
                     break
                 except litellm_ex.exceptions_tuple() as err:
@@ -1428,7 +1489,7 @@ class Coder:
             ]
             return
 
-        edited = self.apply_updates()
+        edited = self.apply_updates(messages, kwargs.get("grammar", None))
 
         if edited:
             self.aider_edited_files.update(edited)
@@ -1629,7 +1690,11 @@ class Coder:
         self.partial_response_content = ""
         self.partial_response_function_call = dict()
 
+        # print("message in send", json.dumps(messages, indent=4))
+
         self.io.log_llm_history("TO LLM", format_messages(messages))
+
+        # print("message in send", json.dumps(messages, indent=4))
 
         completion = None
         try:
@@ -2056,7 +2121,7 @@ class Coder:
 
         return res
 
-    def apply_updates(self):
+    def apply_updates(self, msgs=None, grammar=None):
         edited = set()
         try:
             edits = self.get_edits()
@@ -2074,6 +2139,22 @@ class Coder:
             self.io.tool_output(urls.edit_errors)
             self.io.tool_output()
             self.io.tool_output(str(err))
+
+            msg_file_path = "msgs.json"
+            existing_msgs = []
+            if os.path.exists(msg_file_path):
+                with open(msg_file_path, "r") as msg_file:
+                    existing_msgs = json.load(msg_file)
+
+            if msgs is not None:
+                existing_msgs.append({
+                    "messages": msgs,
+                    "grammar": grammar,
+                    "error" : str(err),
+                })
+
+            with open(msg_file_path, "w") as msg_file:
+                json.dump(existing_msgs, msg_file, indent=4)
 
             self.reflected_message = str(err)
             return edited

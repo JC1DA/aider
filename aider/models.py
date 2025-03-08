@@ -22,7 +22,7 @@ from aider.sendchat import ensure_alternating_roles, sanity_check_messages
 
 RETRY_TIMEOUT = 60
 
-request_timeout = 600
+request_timeout = 1200
 
 DEFAULT_MODEL_NAME = "gpt-4o"
 ANTHROPIC_BETA_HEADER = "prompt-caching-2024-07-31,pdfs-2024-09-25"
@@ -585,6 +585,8 @@ class Model(ModelSettings):
         if grammar is not None:
             kwargs["extra_body"] = {"ebnf": grammar}
 
+            # print("grammar", grammar)
+
         if self.use_temperature is not False:
             if temperature is None:
                 if isinstance(self.use_temperature, bool):
@@ -611,7 +613,69 @@ class Model(ModelSettings):
         if "timeout" not in kwargs:
             kwargs["timeout"] = request_timeout
 
+        if os.environ.get("OPENAI_API_BASE", None):
+            kwargs["api_base"] = os.environ["OPENAI_API_BASE"]
+            kwargs["api_key"] = os.environ["OPENAI_API_KEY"]
+        
+        ask_tag_string = "\nPut the final answer in between <FINAL_ANSWER> and </FINAL_ANSWER> tag."
+        if grammar is not None:
+            kwargs["max_tokens"] = kwargs.get("max_tokens", 8 * 1024)            
+            kwargs["messages"][-1]["content"] += ask_tag_string
+            kwargs["temperature"] = 0.6
+
+        # print("<USER>")
+        # print(kwargs["messages"][-1]["content"] )
+        # print("</USER>")
+        
+        # kwargs["messages"][-1]["content"] += "\n When you're done, say <DONE>"
+        # kwargs["stop"] = ["<DONE>"]
+
         res = litellm.completion(**kwargs)
+
+        kwargs["messages"][-1]["content"]= kwargs["messages"][-1]["content"].replace(ask_tag_string, "")
+
+        # from openai import OpenAI
+        # client = OpenAI(base_url=f"http://192.168.254.10:3000/v1", api_key="None")
+        # res = client.chat.completions.create(
+        #     model="qwen-2.5-coder-fp8-llguidance-diff-fenced",
+        #     messages=kwargs["messages"],
+        #     temperature=kwargs.get("temperature", 0),
+        #     max_tokens=kwargs.get("max_tokens", 1024),
+        #     extra_body=kwargs.get("extra_body", {}),
+        # )
+
+        content = res.choices[0].message.content
+        if "<FINAL_ANSWER>" in content:
+            _idx = content.index("<FINAL_ANSWER>")
+            content = content[_idx + len("<FINAL_ANSWER>"):]
+
+            if content.endswith("</FINAL_ANSWER"):
+                content += ">"
+
+            #if not content.endswith("</FINAL_ANSWER>"):
+            #    content += "\n</FINAL_ANSWER>"
+
+            content = content.replace("</FINAL_ANSWER>", "")
+            res.choices[0].message.content = content
+
+        # print("<CONTENT>")
+        # print(content)
+        # print("</CONTENT>")
+
+        # tmp_file = "./messages.json"
+        # _data = []
+        # if os.path.exists(tmp_file):
+        #     with open(tmp_file, "r") as f:
+        #         _data = json.load(f)
+
+        # _kwargs = kwargs.copy()
+        # _kwargs["response"] = content
+        # _data.append(_kwargs)
+
+        # with open(tmp_file, "w") as f:
+        #     json.dump(_data, f, indent=4)
+
+        # print("send_completion called")
 
         return hash_object, res
 

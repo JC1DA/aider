@@ -40,7 +40,7 @@ app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
 load_dotenv(override=True)
 
 GRM_PREFIX = r"""// header
-start: ( step "\n" )* step ( "\n" final_comments )?
+start: /(\n|.)*/ </think> ( step "\n" )* step ( "\n" final_comments )?
 step: plan "\n" a_file
 plan[lazy]: /((.|\n)*\n)?```/
 final_comments: /[^`]*/
@@ -67,7 +67,8 @@ def lark_change_grm(files: dict[str, str]):
         grm += info
         grm += f"{fid}: {json.dumps(file_name)} SEARCH {fid_rx} replace\n"
         grm_rx += info
-        grm_rx += f"{fid_rx}: %regex {json.dumps({ "substring_chunks": file_lines }, indent=2)}\n"
+        regex = json.dumps({ "substring_chunks": file_lines }, indent=2)
+        grm_rx += f"{fid_rx}: %regex {regex}\n"
 
     grm += "\na_file: " + " | ".join(file_options) + "\n\n"
     grm += grm_rx
@@ -369,7 +370,7 @@ def main(
         keywords = keywords.split(",")
         test_dnames = [dn for dn in test_dnames for keyword in keywords if keyword in dn]
 
-    random.shuffle(test_dnames)
+    # random.shuffle(test_dnames)
     if num_tests > 0:
         test_dnames = test_dnames[:num_tests]
 
@@ -753,7 +754,6 @@ def run_test_real(
     solution_files.difference_update(ignore_files)
 
     # Copy all solution files
-    files_dict = {}
     for file_path in solution_files:
         src = testdir / Path(file_path)
         if src.exists():
@@ -772,12 +772,9 @@ def run_test_real(
             if original_fname.exists():
                 os.makedirs(src.parent, exist_ok=True)
                 shutil.copy(original_fname, src)
-
-            files_dict[file_path] = src.read_text()
         else:
             print(f"Warning: Solution file not found: {src}")
 
-    llguidance_grammar = lark_change_grm(files_dict)
     file_list = " ".join(fname.name for fname in fnames)
 
     instructions = ""
@@ -862,7 +859,27 @@ def run_test_real(
 
             coder.apply_updates()
         else:
+            files_dict = {}
+            for fname in list(coder.abs_fnames):
+                relative_fname = coder.get_rel_fname(fname)
+                files_dict[relative_fname] = open(fname, 'r').read()
+
+                if not files_dict[relative_fname].endswith("\n"):
+                    files_dict[relative_fname] += "\n"
+                    with open(fname, "w") as f:
+                        f.write(files_dict[relative_fname])
+
+            # print("files_dict", files_dict.keys())
+
+            llguidance_grammar = lark_change_grm(files_dict)
             response = coder.run(with_message=instructions, preproc=False, grammar=llguidance_grammar)
+
+            # print("num_frames", len(coder.abs_fnames))
+            # for fname in list(coder.abs_fnames):
+            #     print(fname, coder.get_rel_fname(fname))
+            # print("instructions", instructions)
+
+            # response = coder.run(with_message=instructions, preproc=False)
 
         dur += time.time() - start
 

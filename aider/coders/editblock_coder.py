@@ -94,6 +94,9 @@ class EditBlockCoder(Coder):
 {original}=======
 {updated}>>>>>>> REPLACE
 
+File Content:
+{content}
+
 """
             did_you_mean = find_similar_lines(original, content)
             if did_you_mean:
