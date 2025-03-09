@@ -620,8 +620,13 @@ class Model(ModelSettings):
         ask_tag_string = "\nPut the final answer in between <FINAL_ANSWER> and </FINAL_ANSWER> tag. Only one final answer allowed."
         kwargs["max_tokens"] = kwargs.get("max_tokens", 8 * 1024)            
         kwargs["messages"][-1]["content"] += ask_tag_string
-        # kwargs["temperature"] = 0.6
         kwargs["stop"] = ["</FINAL_ANSWER>"]
+
+        # qwq configs
+        kwargs["temperature"] = 0.6
+        kwargs["repetition_penalty"] = 1.0
+        kwargs["top_p"] = 0.95
+        kwargs["top_k"] = 40
 
         # print("<USER>")
         # print(kwargs["messages"][-1]["content"] )
@@ -662,18 +667,18 @@ class Model(ModelSettings):
         # print(content)
         # print("</CONTENT>")
 
-        # tmp_file = "./messages.json"
-        # _data = []
-        # if os.path.exists(tmp_file):
-        #     with open(tmp_file, "r") as f:
-        #         _data = json.load(f)
+        tmp_file = "./messages.json"
+        _data = []
+        if os.path.exists(tmp_file):
+            with open(tmp_file, "r") as f:
+                _data = json.load(f)
 
-        # _kwargs = kwargs.copy()
-        # _kwargs["response"] = content
-        # _data.append(_kwargs)
+        _kwargs = kwargs.copy()
+        _kwargs["response"] = content
+        _data.append(_kwargs)
 
-        # with open(tmp_file, "w") as f:
-        #     json.dump(_data, f, indent=4)
+        with open(tmp_file, "w") as f:
+            json.dump(_data, f, indent=4)
 
         # print("send_completion called")
 

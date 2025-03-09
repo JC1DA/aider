@@ -45,6 +45,10 @@ class EditBlockCoder(Coder):
 
         for edit in edits:
             path, original, updated = edit
+
+            original = original.strip()
+            updated = updated.strip()
+
             full_path = self.abs_root_path(path)
             new_content = None
 
