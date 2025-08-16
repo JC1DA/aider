@@ -23,6 +23,145 @@ from aider.openrouter import OpenRouterModelManager
 from aider.sendchat import ensure_alternating_roles, sanity_check_messages
 from aider.utils import check_pip_install_extra
 
+# GRM_PREFIX = r"""// header
+# start: /(\n|.)*/ </think> ( step "\n" )* step ( "\n" final_comments )?
+# step: plan "\n" a_file
+# plan[lazy]: /((.|\n)*\n)?```/
+# final_comments: /[^`]*/
+
+# replace: "=======\n" repl_inner " REPLACE\n```"
+# repl_inner[lazy]: /(.|\n)*\n>>>>>>>/
+# SEARCH: "\n<<<<<<< SEARCH\n"
+
+# // file_N: "filename.c" SEARCH FILE_N replace
+
+# // start generated
+# """
+
+# GRM_PREFIX = r"""// header
+# start: analysis output <|return|>
+# analysis: <|channel|> "analysis" <|message|> /(.|\n)*/ <|end|>
+# output: <|start|> "assistant" <|channel|> "final" <|message|> ( step "\n" )* step ( "\n" final_comments )?
+# step: plan "\n" a_file
+# plan[lazy]: /((.|\n)*\n)?```/
+# final_comments: /[^`]*/
+
+# replace: "=======\n" repl_inner " REPLACE\n```"
+# repl_inner[lazy]: /(.|\n)*\n>>>>>>>/
+# SEARCH: "\n<<<<<<< SEARCH\n"
+
+# // file_N: "filename.c" SEARCH FILE_N replace
+
+# // start generated
+# """
+
+# GRM_PREFIX = r"""// header
+# start: analysis output <|return|>
+# analysis: <|channel|> "analysis" <|message|> /(.|\n)*/ <|end|>
+# output: <|start|> "assistant" <|channel|> "final" <|message|> ( step /(\n)+/ )* step
+# step: plan "\n" a_file
+# plan[lazy]: /((.|\n)*\n)?```/
+# final_comments: /[^`]*/
+
+# replace: "=======\n" repl_inner " REPLACE\n```"
+# repl_inner[lazy]: /(.|\n)*\n>>>>>>>/
+# SEARCH: "\n<<<<<<< SEARCH\n"
+
+# // file_N: "filename.c" SEARCH FILE_N replace
+
+# // start generated
+# """
+
+# GRM_PREFIX = r"""// header
+# start: analysis /(\n)*/ output <|return|>
+# analysis: <|channel|> "analysis" <|message|> /(.|\n)*/ <|end|>
+# output: <|start|> "assistant" <|channel|> "final" <|message|> ( step /(\n)+/ )*
+# step: plan "\n" a_file
+# plan[lazy]: /```(python|rust|java|cpp|go|javascript)/
+
+# replace: "=======\n" repl_inner " REPLACE\n```"
+# repl_inner[lazy]: /(.|\n)*\n>>>>>>>/
+# SEARCH: "\n<<<<<<< SEARCH\n"
+
+# // file_N: "filename.c" SEARCH FILE_N replace
+
+# // start generated
+# """
+
+# GRM_PREFIX = r"""// header
+# start: <|channel|> (path1 | path2) <|return|>
+# path1: analysis /(\n)*/ <|start|> "assistant" <|channel|> output
+# path2: output
+# analysis:  "analysis" <|message|> /(.|\n)*/ <|end|>
+# output: "final" <|message|> ( step /(\n)+/ )*
+# step: plan "\n" a_file
+# plan[lazy]: /```(python|rust|java|cpp|go|javascript)/
+
+# replace: "=======\n" repl_inner " REPLACE\n```"
+# repl_inner[lazy]: /(.|\n)*\n>>>>>>>/
+# SEARCH: "\n<<<<<<< SEARCH\n"
+
+# // file_N: "filename.c" SEARCH FILE_N replace
+
+# // start generated
+# """
+
+# GRM_PREFIX = r"""// header
+# start: <|channel|> (path1 | path2) <|return|>
+# path1: analysis /(\n)*/ <|start|> "assistant" <|channel|> output
+# path2: output
+# analysis:  "analysis" <|message|> /(.|\n)*/ <|end|>
+# output: "final" <|message|> ( step /(\n)+/ )*
+# step: plan "\n" a_file
+# plan[lazy]: /```(python|rust|java|cpp|go|javascript)/
+
+# replace: "=======\n" repl_inner " REPLACE\n```"
+# repl_inner[lazy]: /(.|\n)*\n>>>>>>>/
+# SEARCH: "\n<<<<<<< SEARCH\n"
+
+# // file_N: "filename.c" SEARCH FILE_N replace
+
+# // start generated
+# """
+
+GRM_PREFIX = r"""// header
+start: <|channel|> "analysis" <|message|> /(.|\n)*/ <|end|> /(\n)*/ <|start|> "assistant" <|channel|> "final" <|message|> answer <|return|>
+answer: gen_text_step | normal
+gen_text_step: ( step /(\n)+/ )*
+normal: /[^`](.|\n)*/
+step: plan "\n" a_file
+plan[lazy]: /```(python|rust|java|cpp|go|javascript)/
+
+replace: "=======\n" repl_inner " REPLACE\n```"
+repl_inner[lazy]: /(.|\n)*\n>>>>>>>/
+SEARCH: "\n<<<<<<< SEARCH\n"
+
+// file_N: "filename.c" SEARCH FILE_N replace
+
+// start generated
+"""
+
+def lark_change_grm(files: dict[str, str]):
+    grm = GRM_PREFIX
+    file_options = []
+    grm_rx = ""
+    for idx, (file_name, file_content) in enumerate(files.items()):
+        fid = f"file_{idx}"
+        fid_rx = fid.upper()
+        file_options.append(fid)
+        file_lines = file_content.splitlines(keepends=True)
+        info = f"\n// {len(file_lines)} lines, {len(file_content.encode())} bytes\n"
+        grm += info
+        grm += f"{fid}: {json.dumps(file_name)} SEARCH {fid_rx} replace\n"
+        grm_rx += info
+        regex = json.dumps({ "substring_chunks": file_lines }, indent=2)
+        grm_rx += f"{fid_rx}: %regex {regex}\n"
+
+    grm += "\na_file: " + " | ".join(file_options) + "\n\n"
+    grm += grm_rx
+
+    return grm
+
 RETRY_TIMEOUT = 60
 
 request_timeout = 600
@@ -94,7 +233,6 @@ MODEL_ALIASES = {
     # Other models
     "deepseek": "deepseek/deepseek-chat",
     "flash": "gemini/gemini-2.5-flash",
-    "flash-lite": "gemini/gemini-2.5-flash-lite",
     "quasar": "openrouter/openrouter/quasar-alpha",
     "r1": "deepseek/deepseek-reasoner",
     "gemini-2.5-pro": "gemini/gemini-2.5-pro",
@@ -435,14 +573,6 @@ class Model(ModelSettings):
             self.use_repo_map = True
             self.reminder = "sys"
             self.examples_as_sys_msg = False
-            return  # <--
-
-        last_segment = model.split("/")[-1]
-        if last_segment in ("gpt-5", "gpt-5-2025-08-07"):
-            self.use_temperature = False
-            self.edit_format = "diff"
-            if "reasoning_effort" not in self.accepts_settings:
-                self.accepts_settings.append("reasoning_effort")
             return  # <--
 
         if "/o1-mini" in model:
@@ -946,17 +1076,33 @@ class Model(ModelSettings):
 
             os.environ[openai_api_key] = token
 
-    def send_completion(self, messages, functions, stream, temperature=None):
+    def send_completion(self, messages, functions, stream, temperature=None, **kwargs):
         if os.environ.get("AIDER_SANITY_CHECK_TURNS"):
             sanity_check_messages(messages)
 
         if self.is_deepseek_r1():
             messages = ensure_alternating_roles(messages)
 
+        files_dict = kwargs.pop("files_dict", None)
+
         kwargs = dict(
             model=self.name,
             stream=stream,
         )
+
+        if files_dict:
+            # for file_name in files_dict:
+            #     print(f"{file_name}:")
+            #     print(files_dict[file_name])
+            #     print("#"* 80)
+
+            grammar = lark_change_grm(files_dict)
+
+            # print(grammar)
+
+            kwargs["extra_body"] = {
+                "ebnf": grammar
+            }
 
         if self.use_temperature is not False:
             if temperature is None:
@@ -966,6 +1112,26 @@ class Model(ModelSettings):
                     temperature = float(self.use_temperature)
 
             kwargs["temperature"] = temperature
+
+        # set temp
+        kwargs["temperature"] = 1.0
+        # kwargs["temperature"] = 0
+        kwargs["timeout"] = 300
+        kwargs["max_tokens"] = 8192 * 2
+        # messages[-1]["content"] += "\n/nothink"
+        # messages[-1]["content"] += "\nOnly output answer, nothing else (e.g., without ```python and ```, etc.)"
+        messages.insert(0, {
+            "role": "system",
+            "content": """
+You are ChatGPT, a large language model trained by OpenAI.
+Knowledge cutoff: 2024-06
+Current date: 2025-06-28
+Reasoning: high
+# Valid channels: analysis, commentary, final. Channel must be included for every message.
+Calls to these tools must go to the commentary channel: 'functions'.
+""".strip()
+        })
+        messages[1]["role"] = "developer"
 
         if functions is not None:
             function = functions[0]
@@ -997,7 +1163,38 @@ class Model(ModelSettings):
 
             self.github_copilot_token_to_open_ai_key(kwargs["extra_headers"])
 
+        # file_name = "msgs.json"
+        # if not os.path.exists(file_name):
+        #     with open(file_name, "w") as f:
+        #         json.dump(messages, f, indent=2)
+
         res = litellm.completion(**kwargs)
+
+        # message = res.choices[0].message.content   
+        # original_message = message
+        # if "assistantfinal" in message:
+        #     message = message[message.index("assistantfinal") + len("assistantfinal") :]
+        #     res.choices[0].message.content = message
+
+        # print(message)
+        # assert False
+
+        # file_name = "all_messages.json"
+        # if not os.path.exists(file_name):
+        #     data = []
+        # else:
+        #     data = json.load(open(file_name, "r"))
+
+        # data.append({
+        #     "file_dict": files_dict,
+        #     "messages": messages,
+        #     "original_response": original_message,
+        #     "response": message,
+        # })
+
+        # with open(file_name, "w") as f:
+        #     json.dump(data, f, indent=2)
+
         return hash_object, res
 
     def simple_send_with_retries(self, messages):

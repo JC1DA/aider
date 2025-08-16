@@ -52,7 +52,6 @@ from aider.waiting import WaitingSpinner
 from ..dump import dump  # noqa: F401
 from .chat_chunks import ChatChunks
 
-
 class UnknownEditFormat(ValueError):
     def __init__(self, edit_format, valid_formats):
         self.edit_format = edit_format
@@ -1456,7 +1455,17 @@ class Coder:
         try:
             while True:
                 try:
-                    yield from self.send(messages, functions=self.functions)
+                    files_dict = {}
+                    for fname in list(self.abs_fnames):
+                        relative_fname = self.get_rel_fname(fname)
+                        files_dict[relative_fname] = open(fname, 'r').read()
+
+                        if not files_dict[relative_fname].endswith("\n"):
+                            files_dict[relative_fname] += "\n"
+                            with open(fname, "w") as f:
+                                f.write(files_dict[relative_fname])
+
+                    yield from self.send(messages, functions=self.functions, files_dict=files_dict)
                     break
                 except litellm_ex.exceptions_tuple() as err:
                     ex_info = litellm_ex.get_ex_info(err)
@@ -1780,7 +1789,7 @@ class Coder:
         if added_fnames:
             return prompts.added_files.format(fnames=", ".join(added_fnames))
 
-    def send(self, messages, model=None, functions=None):
+    def send(self, messages, model=None, functions=None, **kwargs):
         self.got_reasoning_content = False
         self.ended_reasoning_content = False
 
@@ -1799,6 +1808,7 @@ class Coder:
                 functions,
                 self.stream,
                 self.temperature,
+                **kwargs
             )
             self.chat_completion_call_hashes.append(hash_object.hexdigest())
 
